@@ -1,3 +1,10 @@
+-- =======================================================
+-- Script: sast.lua
+-- Author: Boris Zatserkovnyy
+-- Version: 1.0.0
+-- GitHub: https://github.com/zatserkovnyy/mpv-sast
+-- =======================================================
+
 local mp = require("mp")
 local utils = require("mp.utils")
 
