@@ -1,5 +1,6 @@
 -- =======================================================
 -- Script: sast.lua
+-- Description: Smart Audio & Subtitle Track Selection (SAST) for mpv
 -- Author: Boris Zatserkovnyy
 -- Version: 1.0.0
 -- GitHub: https://github.com/zatserkovnyy/mpv-sast
