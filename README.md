@@ -46,9 +46,9 @@ Commentary and audio-description tracks are always skipped.
 ## How it works
 
 - Uses `track-list` to build internal caches of audio and subtitle tracks.
-- Detects languages and special track types via language codes (`ru`, `rus`, `en`…) and extensive keyword lists in track titles (supports both English and Russian keywords).
+- Detects languages and special track types via strict language code matching (`ru`, `rus`, `en`, `eng`) and extensive keyword lists in track titles (supports both English and Russian keywords).
+- Built-in debouncing mechanism on `file-loaded` and `tracks-changed` events prevents race conditions and event spam.
 - Observes the `aid` property so that changing audio manually also updates subtitles.
-- Reloads selection on `file-loaded` and `tracks-changed` events.
 
 ## Installation
 
@@ -72,7 +72,7 @@ All detection is driven by these tables at the top of the file:
 
 You can freely add or remove entries (both English and local-language variants are already included).
 
-### 2. Codec priority
+### 2. Code priority
 
 ```lua
 local CODEC_PRIORITY = {
@@ -98,7 +98,7 @@ Functions such as:
 - `is_full_russian_sub()`
 - `is_forced_russian_sub()`
 
-can be modified if you want to support additional languages or different detection rules.
+can be modified if you want to support additional languages or different detection rules (uses exact matching for language tags like `ru`, `rus`, `en`, `eng`).
 
 ### 5. External subtitle extensions
 
@@ -110,9 +110,9 @@ for _, ext in ipairs({ ".ass", ".ssa", ".srt", ".vtt" }) do
 
 Add or remove extensions as needed.
 
-### 6. Timing
+### 6. Timing and debouncing
 
-A short delay (`0.05` s) is used after `file-loaded` to let mpv finish probing tracks. Increase it if you experience race conditions on slow systems.
+A short debouncing delay (`0.1` s via `track_update_timer`) is used on `file-loaded` and `tracks-changed` to prevent event spamming and allow mpv to finish probing tracks. You can adjust this value in the script if you experience issues on slower systems or network drives.
 
 ## Adapting for other languages / regions
 
