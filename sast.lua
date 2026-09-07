@@ -2,7 +2,7 @@
 -- Script: sast.lua
 -- Description: Smart Audio & Subtitle Track Selection (SAST) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.0.1
+-- Version: 1.0.2
 -- GitHub: https://github.com/zatserkovnyy/mpv-sast
 -- =======================================================
 
@@ -177,6 +177,20 @@ local function text_contains_keywords(text, keywords)
 end
 
 -- ======================================
+-- HELPER: LANGUAGE CHECKS
+-- ======================================
+
+local function is_lang_ru(lang)
+	if not lang then return false end
+	return lang == "ru" or lang == "rus" or lang:match("^ru%-") ~= nil
+end
+
+local function is_lang_en(lang)
+	if not lang then return false end
+	return lang == "en" or lang == "eng" or lang:match("^en%-") ~= nil
+end
+
+-- ======================================
 -- HELPER: TRACK TYPE CHECKS
 -- ======================================
 
@@ -191,23 +205,21 @@ local function is_original_audio(track)
 	end
 
 	local lang = (track.lang or ""):lower()
-	return lang == "" or not (lang == "ru" or lang == "rus" or lang == "en" or lang == "eng")
+	return lang == "" or not (is_lang_ru(lang) or is_lang_en(lang))
 end
 
 local function is_english_audio(track)
 	if not track then
 		return false
 	end
-	local lang = (track.lang or ""):lower()
-	return lang == "en" or lang == "eng"
+	return is_lang_en((track.lang or ""):lower())
 end
 
 local function is_russian_audio(track)
 	if not track then
 		return false
 	end
-	local lang = (track.lang or ""):lower()
-	return lang == "ru" or lang == "rus"
+	return is_lang_ru((track.lang or ""):lower())
 end
 
 local function is_excluded_audio(track)
@@ -240,7 +252,7 @@ local function is_full_russian_sub(sub)
 	local lang = (sub.lang or ""):lower()
 	local title = (sub.title or ""):lower()
 
-	if lang ~= "" and not (lang == "ru" or lang == "rus") then
+	if lang ~= "" and not is_lang_ru(lang) then
 		return false
 	end
 
@@ -248,13 +260,11 @@ local function is_full_russian_sub(sub)
 		return false
 	end
 
-	local is_ru_lang = (lang == "ru" or lang == "rus")
-	if is_ru_lang then
+	if is_lang_ru(lang) then
 		return true
 	end
 
-	local is_ru_title = text_contains_keywords(title, RUSSIAN_FULL_KEYWORDS)
-	if is_ru_title then
+	if text_contains_keywords(title, RUSSIAN_FULL_KEYWORDS) then
 		return true
 	end
 	return false
@@ -266,9 +276,9 @@ local function is_forced_russian_sub(sub)
 	end
 	local lang = (sub.lang or ""):lower()
 	local title = (sub.title or ""):lower()
-	local is_ru_lang = (lang == "ru" or lang == "rus")
+	local is_ru = is_lang_ru(lang)
 	local is_forced = sub.forced == true or text_contains_keywords(title, RUSSIAN_FORCED_KEYWORDS)
-	return is_ru_lang and is_forced
+	return is_ru and is_forced
 end
 
 -- ======================================
@@ -389,7 +399,7 @@ local function choose_best_audio_track()
 				end,
 				function(t)
 					local lang = (t.lang or ""):lower()
-					return not (lang == "ru" or lang == "rus" or lang == "en" or lang == "eng")
+					return not (is_lang_ru(lang) or is_lang_en(lang))
 						and not is_commentary(t)
 						and not is_excluded_audio(t)
 				end,
