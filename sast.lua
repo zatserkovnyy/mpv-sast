@@ -2,7 +2,7 @@
 -- Script: sast.lua
 -- Description: Smart Audio & Subtitle Track Selection (SAST) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.0.2
+-- Version: 1.1.0
 -- GitHub: https://github.com/zatserkovnyy/mpv-sast
 -- =======================================================
 
@@ -128,22 +128,22 @@ local RUSSIAN_FORCED_KEYWORDS = {
 }
 
 local CODEC_PRIORITY = {
-	["truehd"] = 8,
-	["dts-hd ma"] = 7,
-	["dts-hd-ma"] = 7,
-	["dtshd ma"] = 7,
-	["dtshd-ma"] = 7,
-	["dts-hd"] = 6,
-	["pcm"] = 6,
-	["flac"] = 6,
-	["alac"] = 6,
-	["eac3"] = 5,
-	["dts"] = 4,
-	["ac3"] = 3,
-	["opus"] = 2,
-	["aac"] = 1,
-	["vorbis"] = 1,
-	["mp3"] = 0,
+    ["truehd"] = 8,
+    ["dts-hd ma"] = 7,
+    ["dts-hd-ma"] = 7,
+    ["dtshd ma"] = 7,
+    ["dtshd-ma"] = 7,
+    ["dts-hd"] = 6,
+    ["pcm"] = 6,
+    ["flac"] = 6,
+    ["alac"] = 6,
+    ["eac3"] = 5,
+    ["dts"] = 4,
+    ["ac3"] = 3,
+    ["opus"] = 2,
+    ["aac"] = 1,
+    ["vorbis"] = 1,
+    ["mp3"] = 0
 }
 
 -- ======================================
@@ -151,371 +151,258 @@ local CODEC_PRIORITY = {
 -- ======================================
 
 local state = {
-	audio_track_list = {},
-	subtitle_track_list = {},
-	current_audio_id = nil,
-	current_sub_id = nil,
+    audio_tracks = {},
+    sub_tracks = {},
+    aid = nil,
+    sid = nil
 }
 
-local track_update_timer = nil
+local debounce_timer = nil
 
 -- ======================================
--- HELPER: KEYWORD CHECK
+-- UTILITIES
 -- ======================================
 
-local function text_contains_keywords(text, keywords)
-	if not text or text == "" then
-		return false
-	end
-	text = text:lower()
-	for _, kw in ipairs(keywords) do
-		if text:find(kw, 1, true) then
-			return true
-		end
-	end
-	return false
+local function get_val(track, prop)
+    return (track and track[prop] or ""):lower()
 end
 
--- ======================================
--- HELPER: LANGUAGE CHECKS
--- ======================================
-
-local function is_lang_ru(lang)
-	if not lang then return false end
-	return lang == "ru" or lang == "rus" or lang:match("^ru%-") ~= nil
-end
-
-local function is_lang_en(lang)
-	if not lang then return false end
-	return lang == "en" or lang == "eng" or lang:match("^en%-") ~= nil
-end
-
--- ======================================
--- HELPER: TRACK TYPE CHECKS
--- ======================================
-
-local function is_original_audio(track)
-	if not track then
-		return false
-	end
-
-	local title = (track.title or ""):lower()
-	if title:find("original", 1, true) then
-		return true
-	end
-
-	local lang = (track.lang or ""):lower()
-	return lang == "" or not (is_lang_ru(lang) or is_lang_en(lang))
-end
-
-local function is_english_audio(track)
-	if not track then
-		return false
-	end
-	return is_lang_en((track.lang or ""):lower())
-end
-
-local function is_russian_audio(track)
-	if not track then
-		return false
-	end
-	return is_lang_ru((track.lang or ""):lower())
-end
-
-local function is_excluded_audio(track)
+local function has_keywords(text, keywords)
+    if not text or text == "" then
+        return false
+    end
+    for _, kw in ipairs(keywords) do
+        if text:find(kw, 1, true) then
+            return true
+        end
+    end
     return false
 end
 
-local function is_commentary(track)
-	if not track then
-		return false
-	end
-	local title = (track.title or ""):lower()
-	if text_contains_keywords(title, COMMENTARY_KEYWORDS) then
-		return true
-	end
-	if title:find("director", 1, true) and title:find("comment", 1, true) then
-		return true
-	end
-	return false
+local function is_lang_ru(lang)
+    if not lang or lang == "" then
+        return false
+    end
+    return lang == "ru" or lang == "rus" or lang:match("^ru%-") ~= nil
+end
+
+local function is_lang_en(lang)
+    if not lang or lang == "" then
+        return false
+    end
+    return lang == "en" or lang == "eng" or lang:match("^en%-") ~= nil
 end
 
 -- ======================================
--- SUBTITLE CHECKS
+-- TRACK CHECKS
 -- ======================================
 
+local function is_excluded_audio(track)
+    local l = get_val(track, "lang")
+    return l == "uk" or l == "ukr" or l == "ua" or l:match("^uk%-") ~= nil
+end
+
+local function is_commentary(track)
+    local t = get_val(track, "title")
+    return has_keywords(t, COMMENTARY_KEYWORDS) or (t:find("director", 1, true) and t:find("comment", 1, true))
+end
+
+local function is_original_audio(track)
+    if get_val(track, "title"):find("original", 1, true) then
+        return true
+    end
+    local l = get_val(track, "lang")
+    return l == "" or not (is_lang_ru(l) or is_lang_en(l))
+end
+
+local function is_english_audio(track)
+    return is_lang_en(get_val(track, "lang"))
+end
+local function is_russian_audio(track)
+    return is_lang_ru(get_val(track, "lang"))
+end
+
 local function is_full_russian_sub(sub)
-	if not sub then
-		return false
-	end
-
-	local lang = (sub.lang or ""):lower()
-	local title = (sub.title or ""):lower()
-
-	if lang ~= "" and not is_lang_ru(lang) then
-		return false
-	end
-
-	if text_contains_keywords(title, FORCED_EXCLUDE_KEYWORDS) then
-		return false
-	end
-
-	if is_lang_ru(lang) then
-		return true
-	end
-
-	if text_contains_keywords(title, RUSSIAN_FULL_KEYWORDS) then
-		return true
-	end
-	return false
+    local l, t = get_val(sub, "lang"), get_val(sub, "title")
+    if l ~= "" and not is_lang_ru(l) then
+        return false
+    end
+    if has_keywords(t, FORCED_EXCLUDE_KEYWORDS) then
+        return false
+    end
+    return is_lang_ru(l) or has_keywords(t, RUSSIAN_FULL_KEYWORDS)
 end
 
 local function is_forced_russian_sub(sub)
-	if not sub then
-		return false
-	end
-	local lang = (sub.lang or ""):lower()
-	local title = (sub.title or ""):lower()
-	local is_ru = is_lang_ru(lang)
-	local is_forced = sub.forced == true or text_contains_keywords(title, RUSSIAN_FORCED_KEYWORDS)
-	return is_ru and is_forced
+    local l, t = get_val(sub, "lang"), get_val(sub, "title")
+    return is_lang_ru(l) and (sub.forced or has_keywords(t, RUSSIAN_FORCED_KEYWORDS))
 end
-
--- ======================================
--- SUBTITLE HELPERS
--- ======================================
 
 local function has_full_russian_subs()
-	for _, s in ipairs(state.subtitle_track_list) do
-		if is_full_russian_sub(s) then
-			return true
-		end
-	end
-	return false
+    for _, s in ipairs(state.sub_tracks) do
+        if is_full_russian_sub(s) then
+            return true
+        end
+    end
+    return false
 end
 
 -- ======================================
--- HELPER: SET PROPERTIES
+-- ACTIONS
 -- ======================================
 
-local function set_sub_if_needed(sid)
-	if state.current_sub_id ~= sid then
-		mp.set_property("sid", sid or "no")
-		state.current_sub_id = sid
-	end
+local function set_prop(name, id)
+    if state[name] ~= id then
+        state[name] = id
+        mp.set_property(name, id or "no")
+    end
 end
 
-local function set_audio_if_needed(aid)
-	if state.current_audio_id ~= aid then
-		mp.set_property("aid", aid)
-		state.current_audio_id = aid
-	end
+local function update_cache()
+    state.audio_tracks, state.sub_tracks = {}, {}
+    for _, t in ipairs(mp.get_property_native("track-list") or {}) do
+        if t.type == "audio" then
+            table.insert(state.audio_tracks, t)
+        elseif t.type == "sub" then
+            table.insert(state.sub_tracks, t)
+        end
+    end
 end
 
--- ======================================
--- CACHE UPDATE
--- ======================================
+local function load_external_sub()
+    local path = mp.get_property("path")
+    if not path or path:find("^%a+://") then
+        return
+    end
 
-local function update_track_cache()
-	local tracks = mp.get_property_native("track-list") or {}
-	state.audio_track_list = {}
-	state.subtitle_track_list = {}
+    local dir, filename = utils.split_path(path)
+    local name = filename:match("^(.*)%.")
+    if not name then
+        return
+    end
 
-	for _, t in ipairs(tracks) do
-		if t.type == "audio" then
-			table.insert(state.audio_track_list, t)
-		elseif t.type == "sub" then
-			table.insert(state.subtitle_track_list, t)
-		end
-	end
-end
-
--- ======================================
--- EXTERNAL SUBTITLE LOADING
--- ======================================
-
-local function get_external_sub_path()
-	local path = mp.get_property("path")
-	if not path or path:find("^%a+://") then
-		return nil
-	end
-
-	local dir, filename = utils.split_path(path)
-	local name_no_ext = filename:match("^(.*)%.")
-	if not name_no_ext then
-		return nil
-	end
-
-	for _, ext in ipairs({ ".ass", ".ssa", ".srt", ".vtt" }) do
-		local full_path = utils.join_path(dir, name_no_ext .. ext)
-		local f = io.open(full_path, "r")
-		if f then
-			f:close()
-			return full_path
-		end
-	end
-	return nil
-end
-
-local function load_external_subtitle_if_available()
-	local ext_path = get_external_sub_path()
-	if not ext_path then
-		return false
-	end
-
-	local _, target_name = utils.split_path(ext_path)
-
-	for _, s in ipairs(state.subtitle_track_list) do
-		if s.external and s["external-filename"] then
-			local _, existing_name = utils.split_path(s["external-filename"])
-			if existing_name == target_name then
-				set_sub_if_needed(s.id)
-				return true
-			end
-		end
-	end
-
-	mp.commandv("sub-add", ext_path, "select")
-	return true
+    for _, ext in ipairs({".ass", ".ssa", ".srt", ".vtt"}) do
+        local fpath = utils.join_path(dir, name .. ext)
+        local f = io.open(fpath, "r")
+        if f then
+            f:close()
+            local _, target = utils.split_path(fpath)
+            for _, s in ipairs(state.sub_tracks) do
+                if s.external and s["external-filename"] then
+                    local _, existing = utils.split_path(s["external-filename"])
+                    if existing == target then
+                        set_prop("sid", s.id)
+                        return
+                    end
+                end
+            end
+            mp.commandv("sub-add", fpath, "select")
+            return
+        end
+    end
 end
 
 -- ======================================
--- SELECT BEST AUDIO
+-- SELECTION LOGIC
 -- ======================================
 
-local function choose_best_audio_track()
-	local audio_track_list = state.audio_track_list
-	if #audio_track_list == 0 then
-		return mp.get_property_number("aid")
-	end
+local function get_best_audio()
+    if #state.audio_tracks == 0 then
+        return mp.get_property_number("aid")
+    end
 
-	local candidates = {}
-	local ru_subs = has_full_russian_subs()
+    local p_ru = {function(t)
+        return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+    end, function(t)
+        local l = get_val(t, "lang")
+        return not (is_lang_ru(l) or is_lang_en(l) or is_excluded_audio(t)) and not is_commentary(t)
+    end, function(t)
+        return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+    end}
 
-	local priorities = ru_subs
-			and {
-				function(t)
-					return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-				end,
-				function(t)
-					local lang = (t.lang or ""):lower()
-					return not (is_lang_ru(lang) or is_lang_en(lang))
-						and not is_commentary(t)
-						and not is_excluded_audio(t)
-				end,
-				function(t)
-					return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-				end,
-			}
-		or {
-			function(t)
-				return is_russian_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-			end,
-			function(t)
-				return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-			end,
-			function(t)
-				return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-			end,
-			function(t)
-				return not is_commentary(t) and not is_excluded_audio(t)
-			end,
-		}
+    local p_no_ru = {function(t)
+        return is_russian_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+    end, function(t)
+        return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+    end, function(t)
+        return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+    end, function(t)
+        return not is_commentary(t) and not is_excluded_audio(t)
+    end}
 
-	for _, pred in ipairs(priorities) do
-		candidates = {}
-		for _, t in ipairs(audio_track_list) do
-			if pred(t) then
-				table.insert(candidates, t)
-			end
-		end
-		if #candidates > 0 then
-			break
-		end
-	end
+    local priorities = has_full_russian_subs() and p_ru or p_no_ru
+    local candidates = {}
 
-	if #candidates == 0 then
-		return mp.get_property_number("aid")
-	end
+    for _, pred in ipairs(priorities) do
+        for _, t in ipairs(state.audio_tracks) do
+            if pred(t) then
+                table.insert(candidates, t)
+            end
+        end
+        if #candidates > 0 then
+            break
+        end
+    end
 
-	local max_channels = -1
-	local best = {}
+    if #candidates == 0 then
+        return mp.get_property_number("aid")
+    end
 
-	for _, t in ipairs(candidates) do
-		local ch = t["audio-channels"] or 0
-		if ch > max_channels then
-			max_channels = ch
-			best = { t }
-		elseif ch == max_channels then
-			table.insert(best, t)
-		end
-	end
+    table.sort(candidates, function(a, b)
+        local cha, chb = a["audio-channels"] or 0, b["audio-channels"] or 0
+        if cha ~= chb then
+            return cha > chb
+        end
 
-	if #best > 1 then
-		local best_track = best[1]
-		local best_score = CODEC_PRIORITY[(best_track.codec or ""):lower()] or 0
+        local sca = CODEC_PRIORITY[get_val(a, "codec")] or 0
+        local scb = CODEC_PRIORITY[get_val(b, "codec")] or 0
+        if sca ~= scb then
+            return sca > scb
+        end
 
-		for _, t in ipairs(best) do
-			local score = CODEC_PRIORITY[(t.codec or ""):lower()] or 0
-			if score > best_score then
-				best_score = score
-				best_track = t
-			end
-		end
+        return (a.id or 0) < (b.id or 0)
+    end)
 
-		return best_track.id
-	end
-
-	return best[1].id
+    return candidates[1].id
 end
 
--- ======================================
--- UPDATE SUBTITLES BASED ON AUDIO
--- ======================================
+local function sync_subs(aid)
+    local audio = nil
+    for _, t in ipairs(state.audio_tracks) do
+        if t.id == aid then
+            audio = t
+            break
+        end
+    end
 
-local function sync_subtitles_with_audio(aid)
-	local audio_track = nil
-	for _, t in ipairs(state.audio_track_list) do
-		if t.id == aid then
-			audio_track = t
-			break
-		end
-	end
+    for _, s in ipairs(state.sub_tracks) do
+        if s.external then
+            set_prop("sid", s.id)
+            return
+        end
+    end
 
-	for _, s in ipairs(state.subtitle_track_list) do
-		if s.external then
-			set_sub_if_needed(s.id)
-			return
-		end
-	end
+    if not audio then
+        set_prop("sid", nil)
+        return
+    end
 
-	if not audio_track then
-		set_sub_if_needed(nil)
-		return
-	end
+    local matcher = is_russian_audio(audio) and is_forced_russian_sub or is_full_russian_sub
+    for _, s in ipairs(state.sub_tracks) do
+        if matcher(s) then
+            set_prop("sid", s.id)
+            return
+        end
+    end
 
-	local prefer_forced = is_russian_audio(audio_track)
-	local matcher = prefer_forced and is_forced_russian_sub or is_full_russian_sub
-
-	for _, s in ipairs(state.subtitle_track_list) do
-		if matcher(s) then
-			set_sub_if_needed(s.id)
-			return
-		end
-	end
-
-	set_sub_if_needed(nil)
+    set_prop("sid", nil)
 end
 
--- ======================================
--- RESET
--- ======================================
-
-local function reset_state()
-	state.audio_track_list = {}
-	state.subtitle_track_list = {}
-	state.current_audio_id = nil
-	state.current_sub_id = nil
+local function apply_logic()
+    update_cache()
+    local best_aid = get_best_audio()
+    set_prop("aid", best_aid)
+    sync_subs(best_aid)
 end
 
 -- ======================================
@@ -523,38 +410,32 @@ end
 -- ======================================
 
 mp.register_event("file-loaded", function()
-	if track_update_timer then
-		track_update_timer:kill()
-	end
-	track_update_timer = mp.add_timeout(0.1, function()
-		reset_state()
-		update_track_cache()
-		load_external_subtitle_if_available()
+    if debounce_timer then
+        debounce_timer:kill()
+    end
 
-		local best_aid = choose_best_audio_track()
-		set_audio_if_needed(best_aid)
+    mp.add_timeout(0.05, function()
+        state.aid, state.sid = "init", "init"
 
-		sync_subtitles_with_audio(best_aid)
-	end)
+        update_cache()
+        load_external_sub()
+
+        local best_aid = get_best_audio()
+        set_prop("aid", best_aid)
+        sync_subs(best_aid)
+    end)
 end)
 
 mp.register_event("tracks-changed", function()
-	if track_update_timer then
-		track_update_timer:kill()
-	end
-	track_update_timer = mp.add_timeout(0.1, function()
-		update_track_cache()
-
-		local best_aid = choose_best_audio_track()
-		set_audio_if_needed(best_aid)
-
-		sync_subtitles_with_audio(best_aid)
-	end)
+    if debounce_timer then
+        debounce_timer:kill()
+    end
+    debounce_timer = mp.add_timeout(0.1, apply_logic)
 end)
 
 mp.observe_property("aid", "number", function(_, aid)
-	if aid and aid ~= state.current_audio_id then
-		state.current_audio_id = aid
-		sync_subtitles_with_audio(aid)
-	end
+    if aid and aid ~= state.aid then
+        state.aid = aid
+        sync_subs(aid)
+    end
 end)
