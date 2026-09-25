@@ -46,7 +46,7 @@ Commentary and audio-description tracks are always skipped.
 ## How it works
 
 - Uses `track-list` to build internal caches of audio and subtitle tracks.
-- Detects languages and special track types via strict language code matching (`ru`, `rus`, `en`, `eng`) and extensive keyword lists in track titles (supports both English and Russian keywords).
+- Detects languages and special track types via language code matching including regional subtags (e.g., `ru`, `rus`, `ru-RU`, `en`, `eng`, `en-US`) and extensive keyword lists in track titles (supports both English and Russian keywords).
 - Built-in debouncing mechanism on `file-loaded` and `tracks-changed` events prevents race conditions and event spam.
 - Observes the `aid` property so that changing audio manually also updates subtitles.
 
@@ -72,7 +72,7 @@ All detection is driven by these tables at the top of the file:
 
 You can freely add or remove entries (both English and local-language variants are already included).
 
-### 2. Code priority
+### 2. Codec priority
 
 ```lua
 local CODEC_PRIORITY = {
@@ -86,7 +86,7 @@ Change the numbers or add new codecs to adjust preference order.
 
 ### 3. Audio selection priorities
 
-Look for the `priorities` table inside `choose_best_audio_track()`.  
+Look for the `priorities` table inside `get_best_audio()`.
 You can reorder, add, or remove the predicate functions to suit your preferences.
 
 ### 4. Language detection helpers
@@ -98,7 +98,7 @@ Functions such as:
 - `is_full_russian_sub()`
 - `is_forced_russian_sub()`
 
-can be modified if you want to support additional languages or different detection rules (uses exact matching for language tags like `ru`, `rus`, `en`, `eng`).
+can be modified if you want to support additional languages or different detection rules (uses language code matching including regional subtags like `ru`, `rus`, `ru-RU`, `en`, `eng`, `en-US`).
 
 ### 5. External subtitle extensions
 
@@ -112,7 +112,7 @@ Add or remove extensions as needed.
 
 ### 6. Timing and debouncing
 
-A short debouncing delay (`0.1` s via `track_update_timer`) is used on `file-loaded` and `tracks-changed` to prevent event spamming and allow mpv to finish probing tracks. You can adjust this value in the script if you experience issues on slower systems or network drives.
+A debouncing delay (`0.1` s via `debounce_timer`) is used on `tracks-changed` to prevent event spamming, alongside a short initialization timeout (`0.05` s) on `file-loaded` to let mpv finish probing tracks. You can adjust this value in the script if you experience issues on slower systems or network drives.
 
 ## Adapting for other languages / regions
 
