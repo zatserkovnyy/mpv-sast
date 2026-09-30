@@ -2,7 +2,7 @@
 -- Script: sast.lua
 -- Description: Smart Audio & Subtitle Track Selection (SAST) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.1.0
+-- Version: 1.1.1
 -- GitHub: https://github.com/zatserkovnyy/mpv-sast
 -- =======================================================
 
@@ -200,6 +200,7 @@ end
 local function is_excluded_audio(track)
     local l = get_val(track, "lang")
     return l == "uk" or l == "ukr" or l == "ua" or l:match("^uk%-") ~= nil
+        or l == "kk" or l == "kaz" or l:match("^kk%-") ~= nil or l:match("^kaz%-") ~= nil
 end
 
 local function is_commentary(track)
