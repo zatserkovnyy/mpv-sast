@@ -2,7 +2,7 @@
 -- Script: sast.lua
 -- Description: Smart Audio & Subtitle Track Selection (SAST) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.1.1
+-- Version: 1.1.2
 -- GitHub: https://github.com/zatserkovnyy/mpv-sast
 -- =======================================================
 
@@ -87,6 +87,19 @@ local RUSSIAN_FULL_KEYWORDS = {
 	"Русские полные",
 	"руссуб",
 	"Руссуб",
+}
+
+local RUSSIAN_TITLE_MARKERS = {
+    "russian",
+    "rus ",
+    " rus",
+    "russub",
+    "русские",
+    "Русские",
+    "русский",
+    "Русский",
+    "руссуб",
+    "Руссуб",
 }
 
 local RUSSIAN_FORCED_KEYWORDS = {
@@ -199,8 +212,8 @@ end
 
 local function is_excluded_audio(track)
     local l = get_val(track, "lang")
-    return l == "uk" or l == "ukr" or l == "ua" or l:match("^uk%-") ~= nil
-        or l == "kk" or l == "kaz" or l:match("^kk%-") ~= nil or l:match("^kaz%-") ~= nil
+    return l == "uk" or l == "ukr" or l == "ua" or l:match("^uk%-") ~= nil or l == "kk" or l == "kaz" or
+               l:match("^kk%-") ~= nil or l:match("^kaz%-") ~= nil
 end
 
 local function is_commentary(track)
@@ -223,6 +236,10 @@ local function is_russian_audio(track)
     return is_lang_ru(get_val(track, "lang"))
 end
 
+local function has_russian_title_marker(title)
+    return has_keywords(title, RUSSIAN_TITLE_MARKERS)
+end
+
 local function is_full_russian_sub(sub)
     local l, t = get_val(sub, "lang"), get_val(sub, "title")
     if l ~= "" and not is_lang_ru(l) then
@@ -231,12 +248,14 @@ local function is_full_russian_sub(sub)
     if has_keywords(t, FORCED_EXCLUDE_KEYWORDS) then
         return false
     end
-    return is_lang_ru(l) or has_keywords(t, RUSSIAN_FULL_KEYWORDS)
+    return is_lang_ru(l) or (has_russian_title_marker(t) and has_keywords(t, RUSSIAN_FULL_KEYWORDS))
 end
 
 local function is_forced_russian_sub(sub)
     local l, t = get_val(sub, "lang"), get_val(sub, "title")
-    return is_lang_ru(l) and (sub.forced or has_keywords(t, RUSSIAN_FORCED_KEYWORDS))
+    local is_russian = is_lang_ru(l) or (l == "" and has_russian_title_marker(t))
+
+    return is_russian and (sub.forced or has_keywords(t, RUSSIAN_FORCED_KEYWORDS))
 end
 
 local function has_full_russian_subs()
@@ -350,7 +369,7 @@ local function get_best_audio()
     end
 
     table.sort(candidates, function(a, b)
-        local cha, chb = a["audio-channels"] or 0, b["audio-channels"] or 0
+        local cha, chb = a["demux-channel-count"] or 0, b["demux-channel-count"] or 0
         if cha ~= chb then
             return cha > chb
         end
