@@ -68,6 +68,7 @@ All detection is driven by these tables at the top of the file:
 - `COMMENTARY_KEYWORDS` — tracks to skip (commentary, director’s comments, audio description…)
 - `FORCED_EXCLUDE_KEYWORDS` — words that mark a track as forced/signs (used to *exclude* them from full-subtitle detection)
 - `RUSSIAN_FULL_KEYWORDS` — words that identify full Russian subtitles
+- `RUSSIAN_TITLE_MARKERS` — markers used to identify Russian subtitles when a track has no language tag. Words like “full” or “complete” alone are not enough; the title must also contain a Russian-language marker
 - `RUSSIAN_FORCED_KEYWORDS` — words that identify forced / signs Russian subtitles
 
 You can freely add or remove entries (both English and local-language variants are already included).
