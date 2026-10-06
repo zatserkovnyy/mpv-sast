@@ -2,7 +2,7 @@
 -- Script: sast.lua
 -- Description: Smart Audio & Subtitle Track Selection (SAST) for mpv
 -- Author: Boris Zatserkovnyy
--- Version: 1.1.2
+-- Version: 1.2.0
 -- GitHub: https://github.com/zatserkovnyy/mpv-sast
 -- =======================================================
 
@@ -90,16 +90,16 @@ local RUSSIAN_FULL_KEYWORDS = {
 }
 
 local RUSSIAN_TITLE_MARKERS = {
-    "russian",
-    "rus ",
-    " rus",
-    "russub",
-    "русские",
-    "Русские",
-    "русский",
-    "Русский",
-    "руссуб",
-    "Руссуб",
+	"russian",
+	"rus ",
+	" rus",
+	"russub",
+	"русские",
+	"Русские",
+	"русский",
+	"Русский",
+	"руссуб",
+	"Руссуб",
 }
 
 local RUSSIAN_FORCED_KEYWORDS = {
@@ -141,22 +141,22 @@ local RUSSIAN_FORCED_KEYWORDS = {
 }
 
 local CODEC_PRIORITY = {
-    ["truehd"] = 8,
-    ["dts-hd ma"] = 7,
-    ["dts-hd-ma"] = 7,
-    ["dtshd ma"] = 7,
-    ["dtshd-ma"] = 7,
-    ["dts-hd"] = 6,
-    ["pcm"] = 6,
-    ["flac"] = 6,
-    ["alac"] = 6,
-    ["eac3"] = 5,
-    ["dts"] = 4,
-    ["ac3"] = 3,
-    ["opus"] = 2,
-    ["aac"] = 1,
-    ["vorbis"] = 1,
-    ["mp3"] = 0
+	["truehd"] = 8,
+	["dts-hd ma"] = 7,
+	["dts-hd-ma"] = 7,
+	["dtshd ma"] = 7,
+	["dtshd-ma"] = 7,
+	["dts-hd"] = 6,
+	["pcm"] = 6,
+	["flac"] = 6,
+	["alac"] = 6,
+	["eac3"] = 5,
+	["dts"] = 4,
+	["ac3"] = 3,
+	["opus"] = 2,
+	["aac"] = 1,
+	["vorbis"] = 1,
+	["mp3"] = 0,
 }
 
 -- ======================================
@@ -167,7 +167,8 @@ local state = {
     audio_tracks = {},
     sub_tracks = {},
     aid = nil,
-    sid = nil
+    sid = nil,
+    ready = false
 }
 
 local debounce_timer = nil
@@ -175,6 +176,13 @@ local debounce_timer = nil
 -- ======================================
 -- UTILITIES
 -- ======================================
+
+local function stop_timer()
+    if debounce_timer then
+        debounce_timer:kill()
+        debounce_timer = nil
+    end
+end
 
 local function get_val(track, prop)
     return (track and track[prop] or ""):lower()
@@ -217,8 +225,7 @@ local function is_excluded_audio(track)
 end
 
 local function is_commentary(track)
-    local t = get_val(track, "title")
-    return has_keywords(t, COMMENTARY_KEYWORDS) or (t:find("director", 1, true) and t:find("comment", 1, true))
+    return has_keywords(get_val(track, "title"), COMMENTARY_KEYWORDS)
 end
 
 local function is_original_audio(track)
@@ -226,12 +233,13 @@ local function is_original_audio(track)
         return true
     end
     local l = get_val(track, "lang")
-    return l == "" or not (is_lang_ru(l) or is_lang_en(l))
+    return not (is_lang_ru(l) or is_lang_en(l))
 end
 
 local function is_english_audio(track)
     return is_lang_en(get_val(track, "lang"))
 end
+
 local function is_russian_audio(track)
     return is_lang_ru(get_val(track, "lang"))
 end
@@ -302,11 +310,11 @@ local function load_external_sub()
     end
 
     for _, ext in ipairs({".ass", ".ssa", ".srt", ".vtt"}) do
-        local fpath = utils.join_path(dir, name .. ext)
+        local target = name .. ext
+        local fpath = utils.join_path(dir, target)
         local f = io.open(fpath, "r")
         if f then
             f:close()
-            local _, target = utils.split_path(fpath)
             for _, s in ipairs(state.sub_tracks) do
                 if s.external and s["external-filename"] then
                     local _, existing = utils.split_path(s["external-filename"])
@@ -317,6 +325,7 @@ local function load_external_sub()
                 end
             end
             mp.commandv("sub-add", fpath, "select")
+            update_cache()
             return
         end
     end
@@ -326,31 +335,43 @@ end
 -- SELECTION LOGIC
 -- ======================================
 
+local PRIORITY_WITH_RU_SUBS = {function(t)
+    return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+end, function(t)
+    return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+end}
+
+local PRIORITY_WITHOUT_RU_SUBS = {function(t)
+    return is_russian_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+end, function(t)
+    return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+end, function(t)
+    return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
+end, function(t)
+    return not is_commentary(t) and not is_excluded_audio(t)
+end}
+
+local function compare_audio_tracks(a, b)
+    local cha, chb = a["demux-channel-count"] or 0, b["demux-channel-count"] or 0
+    if cha ~= chb then
+        return cha > chb
+    end
+
+    local sca = CODEC_PRIORITY[get_val(a, "codec")] or 0
+    local scb = CODEC_PRIORITY[get_val(b, "codec")] or 0
+    if sca ~= scb then
+        return sca > scb
+    end
+
+    return (a.id or 0) < (b.id or 0)
+end
+
 local function get_best_audio()
     if #state.audio_tracks == 0 then
         return mp.get_property_number("aid")
     end
 
-    local p_ru = {function(t)
-        return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-    end, function(t)
-        local l = get_val(t, "lang")
-        return not (is_lang_ru(l) or is_lang_en(l) or is_excluded_audio(t)) and not is_commentary(t)
-    end, function(t)
-        return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-    end}
-
-    local p_no_ru = {function(t)
-        return is_russian_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-    end, function(t)
-        return is_original_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-    end, function(t)
-        return is_english_audio(t) and not is_commentary(t) and not is_excluded_audio(t)
-    end, function(t)
-        return not is_commentary(t) and not is_excluded_audio(t)
-    end}
-
-    local priorities = has_full_russian_subs() and p_ru or p_no_ru
+    local priorities = has_full_russian_subs() and PRIORITY_WITH_RU_SUBS or PRIORITY_WITHOUT_RU_SUBS
     local candidates = {}
 
     for _, pred in ipairs(priorities) do
@@ -368,20 +389,7 @@ local function get_best_audio()
         return mp.get_property_number("aid")
     end
 
-    table.sort(candidates, function(a, b)
-        local cha, chb = a["demux-channel-count"] or 0, b["demux-channel-count"] or 0
-        if cha ~= chb then
-            return cha > chb
-        end
-
-        local sca = CODEC_PRIORITY[get_val(a, "codec")] or 0
-        local scb = CODEC_PRIORITY[get_val(b, "codec")] or 0
-        if sca ~= scb then
-            return sca > scb
-        end
-
-        return (a.id or 0) < (b.id or 0)
-    end)
+    table.sort(candidates, compare_audio_tracks)
 
     return candidates[1].id
 end
@@ -430,32 +438,49 @@ end
 -- ======================================
 
 mp.register_event("file-loaded", function()
-    if debounce_timer then
-        debounce_timer:kill()
-    end
+    stop_timer()
+    state.audio_tracks, state.sub_tracks = {}, {}
+    state.aid, state.sid = "init", "init"
+    state.ready = false
 
-    mp.add_timeout(0.05, function()
-        state.aid, state.sid = "init", "init"
-
+    debounce_timer = mp.add_timeout(0.05, function()
+        debounce_timer = nil
         update_cache()
         load_external_sub()
 
         local best_aid = get_best_audio()
         set_prop("aid", best_aid)
         sync_subs(best_aid)
+        state.ready = true
     end)
 end)
 
 mp.register_event("tracks-changed", function()
-    if debounce_timer then
-        debounce_timer:kill()
+    if not state.ready then
+        return
     end
-    debounce_timer = mp.add_timeout(0.1, apply_logic)
+    stop_timer()
+    debounce_timer = mp.add_timeout(0.1, function()
+        debounce_timer = nil
+        apply_logic()
+    end)
+end)
+
+mp.register_event("end-file", function()
+    stop_timer()
+    state.audio_tracks, state.sub_tracks = {}, {}
+    state.aid, state.sid = nil, nil
+    state.ready = false
 end)
 
 mp.observe_property("aid", "number", function(_, aid)
-    if aid and aid ~= state.aid then
+    if not state.ready then
+        return
+    end
+    if aid ~= state.aid then
         state.aid = aid
-        sync_subs(aid)
+        if aid then
+            sync_subs(aid)
+        end
     end
 end)
