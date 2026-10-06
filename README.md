@@ -20,9 +20,8 @@ On file load (and when tracks change), the script:
 ### Audio selection priority
 
 **When full Russian subtitles are available:**
-1. Original language audio (non-Russian / non-English, non-commentary)
-2. Other non-Russian / non-English tracks
-3. English audio
+1. Original language audio (explicitly marked as "original" or any non-Russian / non-English track)
+2. English audio
 
 **When full Russian subtitles are NOT available:**
 1. Russian audio
@@ -87,23 +86,22 @@ Change the numbers or add new codecs to adjust preference order.
 
 ### 3. Audio selection priorities
 
-Look for the `priorities` table inside `get_best_audio()`.
+Look for the `PRIORITY_WITH_RU_SUBS` and `PRIORITY_WITHOUT_RU_SUBS` tables in the `SELECTION LOGIC` section.
 You can reorder, add, or remove the predicate functions to suit your preferences.
 
 ### 4. Language detection helpers
 
 Functions such as:
-- `is_russian_audio()`
-- `is_english_audio()`
-- `is_original_audio()`
-- `is_full_russian_sub()`
-- `is_forced_russian_sub()`
+- `is_lang_ru()` / `is_lang_en()`
+- `is_excluded_audio()`
+- `is_russian_audio()` / `is_english_audio()` / `is_original_audio()`
+- `is_full_russian_sub()` / `is_forced_russian_sub()`
 
-can be modified if you want to support additional languages or different detection rules (uses language code matching including regional subtags like `ru`, `rus`, `ru-RU`, `en`, `eng`, `en-US`).
+can be modified if you want to support additional languages, exclude specific audio tracks, or use different detection rules (uses language code matching including regional subtags like `ru`, `rus`, `ru-RU`, `en`, `eng`, `en-US`).
 
 ### 5. External subtitle extensions
 
-In `get_external_sub_path()`:
+In `load_external_sub()`:
 
 ```lua
 for _, ext in ipairs({ ".ass", ".ssa", ".srt", ".vtt" }) do
@@ -121,8 +119,8 @@ The script is currently tuned for **Russian subtitles + original audio**.
 To adapt it for another language (e.g. Spanish, French, Japanese…):
 
 1. Replace all Russian-related keyword lists with equivalents for your language.
-2. Update the language-matching functions (`is_russian_audio`, `is_full_russian_sub`, etc.) to check for your language codes.
-3. Adjust the priority order in `choose_best_audio_track()` if needed.
+2. Update the language-matching functions (`is_lang_ru`, `is_lang_en`, `is_excluded_audio`, etc.) to check for your language codes.
+3. Adjust the priority order in `PRIORITY_WITH_RU_SUBS` and `PRIORITY_WITHOUT_RU_SUBS` (used by `get_best_audio()`) if needed.
 
 Because the logic is driven almost entirely by configurable keyword tables and simple language checks, porting to another region is straightforward.
 
